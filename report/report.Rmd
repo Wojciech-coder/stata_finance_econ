@@ -1,0 +1,245 @@
+---
+title: "Predicting Housing Prices in Greater Boston"
+subtitle: "Application of Statistics and Econometrics in Finance and Accounting"
+author: "Group 1"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  word_document:
+    toc: true
+    toc_depth: 2
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.align = "center")
+library(knitr)
+library(dplyr)
+
+tables_dir <- "output/tables"
+figures_dir <- "output/figures"
+
+summary_stats <- read.csv(file.path(tables_dir, "summary_stats.csv"))
+slr_comp <- read.csv(file.path(tables_dir, "simple_models_comparison.csv"))
+mr_comp <- read.csv(file.path(tables_dir, "multiple_models_comparison.csv"))
+all_comp <- read.csv(file.path(tables_dir, "model_comparison.csv"))
+vif_tab <- read.csv(file.path(tables_dir, "vif.csv"))
+high_cor <- read.csv(file.path(tables_dir, "high_correlations.csv"))
+
+round3 <- function(x) round(x, 3)
+```
+
+# Introduction
+
+This report analyses the Boston housing market using the `Boston` dataset from the `MASS` package. The goal is to identify which socio-economic and structural factors best explain median home values across Boston census tracts.
+
+**Research question:** What factors best predict housing prices in Boston?
+
+**Dependent variable:** `medv` — median value of owner-occupied homes (in $1,000s).
+
+**Main predictors used in the analysis:**
+
+| Variable | Description |
+|----------|-------------|
+| `rm` | Average number of rooms per dwelling |
+| `lstat` | Percentage of lower-status population |
+| `nox` | Nitric oxides concentration |
+| `ptratio` | Pupil-teacher ratio |
+| `dis` | Weighted distance to employment centres |
+| `crim`, `zn`, `indus`, `chas`, `age`, `rad`, `tax`, `black` | Additional neighbourhood characteristics |
+
+We estimate simple and multiple linear regression models and compare their explanatory power.
+
+# Data Exploration
+
+The dataset contains **506 observations** and **14 variables** describing Boston census tracts. The data come from the 1970s and should be interpreted in that historical context.
+
+## Summary statistics
+
+```{r summary-table}
+summary_stats %>%
+  mutate(across(where(is.numeric), round3)) %>%
+  kable(caption = "Table 1: Summary statistics for all variables")
+```
+
+## Data issues
+
+Several issues should be noted before interpreting the models:
+
+1. **`medv` is censored at 50** — 16 tracts have a median home value equal to $50,000, which compresses the upper tail of the distribution.
+2. **`crim` is highly right-skewed** — the maximum crime rate (88.98) is much higher than the mean (3.61).
+3. **Multicollinearity among predictors** — several variable pairs are strongly correlated (|r| > 0.7), especially `rad` and `tax` (r = 0.91) and `nox` and `dis` (r = -0.77).
+4. **Cross-sectional data** — the dataset captures one point in time, so causal interpretation is limited.
+
+```{r high-cor}
+high_cor %>%
+  mutate(r = round3(r)) %>%
+  kable(caption = "Table 2: Predictor pairs with |r| > 0.7")
+```
+
+## Distribution of the dependent variable
+
+```{r fig-medv, fig.cap="Figure 1: Distribution of median home values (medv). The dashed line marks the censoring ceiling at $50,000."}
+knitr::include_graphics(file.path(figures_dir, "medv_histogram.png"))
+```
+
+## Correlation structure
+
+```{r fig-corr, fig.cap="Figure 2: Correlation matrix of all variables."}
+knitr::include_graphics(file.path(figures_dir, "correlation_matrix.png"))
+```
+
+## Scatterplots
+
+```{r fig-scatter, fig.cap="Figure 3: Scatterplots of medv against selected predictors with OLS regression lines."}
+knitr::include_graphics(file.path(figures_dir, "scatter_medv_lstat.png"))
+```
+
+```{r fig-scatter2, fig.cap="Figure 4: Relationship between medv and average number of rooms (rm)."}
+knitr::include_graphics(file.path(figures_dir, "scatter_medv_rm.png"))
+```
+
+# Regression Analysis
+
+## Simple linear regression models
+
+Four simple linear regression models were estimated, each with one explanatory variable:
+
+- `medv ~ rm`
+- `medv ~ lstat`
+- `medv ~ nox`
+- `medv ~ ptratio`
+
+```{r slr-table}
+slr_comp %>%
+  mutate(across(where(is.numeric), round3)) %>%
+  kable(caption = "Table 3: Comparison of simple linear regression models")
+```
+
+The best simple model is **`lstat`** with adjusted R² = **`r slr_comp$adj_r_sq[slr_comp$model == 'lstat']`**. This means that socioeconomic status alone explains about 54% of the variation in median home values.
+
+**Interpretation (medv ~ lstat):** A one percentage-point increase in the lower-status population is associated with a decrease in median home value. The relationship is negative, strong, and statistically significant.
+
+```{r fig-slr, fig.cap="Figure 5: Simple regression of medv on lstat."}
+knitr::include_graphics(file.path(figures_dir, "slr_lstat.png"))
+```
+
+```{r fig-slr2, fig.cap="Figure 6: Simple regression of medv on rm."}
+knitr::include_graphics(file.path(figures_dir, "slr_rm.png"))
+```
+
+## Multiple linear regression models
+
+Three multiple regression models were estimated manually:
+
+1. **MR1:** `medv ~ rm + lstat + nox + dis`
+2. **MR2:** `medv ~ rm + age + tax + ptratio`
+3. **MR3:** `medv ~ rm + lstat + ptratio + dis + nox + chas`
+
+```{r mr-table}
+mr_comp %>%
+  mutate(across(where(is.numeric), round3)) %>%
+  kable(caption = "Table 4: Comparison of multiple regression models")
+```
+
+Multiple regression improves model fit substantially. The best manual model (**MR3**) reaches adjusted R² = **`r round3(mr_comp$adj_r_sq[mr_comp$model == 'mr3'])`**, compared with 0.543 for the best simple model.
+
+When controlling for several predictors simultaneously, the effect of individual variables becomes more realistic because omitted-variable bias is reduced.
+
+## Model selection
+
+Two automated selection methods were applied:
+
+- **`stepAIC()`** — stepwise selection starting from the full model
+- **`regsubsets()`** — best-subset selection by adjusted R²
+
+Both methods selected the same final model:
+
+`medv ~ crim + zn + chas + nox + rm + dis + rad + tax + ptratio + black + lstat`
+
+```{r all-table}
+all_comp %>%
+  mutate(across(where(is.numeric), round3)) %>%
+  kable(caption = "Table 5: Comparison of all estimated models")
+```
+
+The final model explains about **74%** of the variance in `medv` (adjusted R² = **`r round3(all_comp$adj_r_sq[all_comp$model == 'stepAIC'])`**).
+
+Key coefficients in the final model (stepAIC):
+
+- **`rm` (+):** more rooms increase home values
+- **`lstat` (-):** higher share of lower-status population reduces values
+- **`nox` (-):** worse air quality reduces values
+- **`ptratio` (-):** worse school quality (higher pupil-teacher ratio) reduces values
+- **`chas` (+):** proximity to the Charles River increases values
+
+# Model Diagnostics
+
+Diagnostics were performed on the final stepAIC model.
+
+## Multicollinearity (VIF)
+
+```{r vif-table}
+vif_tab %>%
+  mutate(VIF = round3(VIF)) %>%
+  kable(caption = "Table 6: Variance Inflation Factors (VIF)")
+```
+
+`rad` (VIF = 6.86) and `tax` (VIF = 7.27) exceed the common threshold of 5, indicating moderate multicollinearity. This can inflate standard errors and make individual coefficient estimates less stable.
+
+## Residual analysis
+
+```{r fig-resid, fig.cap="Figure 7: Residuals vs fitted values for the final model."}
+knitr::include_graphics(file.path(figures_dir, "residuals.png"))
+```
+
+```{r fig-qq, fig.cap="Figure 8: Normal Q-Q plot of residuals."}
+knitr::include_graphics(file.path(figures_dir, "qq_plot.png"))
+```
+
+```{r fig-diag, fig.cap="Figure 9: Standard regression diagnostic plots."}
+knitr::include_graphics(file.path(figures_dir, "diagnostics.png"))
+```
+
+The residuals show some deviation from normality in the tails and mild heteroscedasticity for higher fitted values. Several observations also have relatively high influence (Cook's distance), so results should be interpreted with some caution.
+
+# Interpretation
+
+## Statistical significance
+
+In the final model, all predictors are statistically significant at the 5% level. The strongest effects belong to `lstat`, `rm`, `nox`, and `dis`.
+
+## Economic significance
+
+- **Rooms (`rm`):** In the final model, each additional room is associated with roughly a **$3,800** increase in median home value.
+- **Socioeconomic status (`lstat`):** A 10-point increase in the lower-status population is associated with roughly a **$5,200** decrease in median home value.
+- **Air pollution (`nox`):** Higher pollution is associated with lower prices, which is consistent with environmental quality affecting property values.
+- **School quality (`ptratio`):** Higher pupil-teacher ratios are associated with lower home values.
+
+## Simple vs multiple models
+
+The best simple model (`lstat`) explains about 54% of the variation in prices. The final multiple model explains about 74%. This confirms that housing prices are driven by several factors jointly, not by a single variable alone.
+
+# Limitations
+
+1. The data are **cross-sectional**, so we cannot claim causality.
+2. **Omitted variables** such as renovation quality, local amenities, or recent infrastructure investments are not included.
+3. **`medv` is censored** at $50,000 for some observations.
+4. The dataset reflects **1970s conditions**, so results may not apply to today's Boston housing market.
+5. **Multicollinearity** among predictors makes it harder to interpret individual coefficients precisely.
+
+# Conclusion
+
+Median housing prices in Boston are best explained by a combination of housing characteristics (`rm`), socioeconomic composition (`lstat`), environmental quality (`nox`), accessibility (`dis`), and school quality (`ptratio`). Multiple regression models clearly outperform simple models.
+
+For real estate analysis, it is better to use a multivariate model rather than relying on one predictor. Neighbourhoods with larger homes, lower `lstat`, lower pollution, and better school indicators tend to have higher median prices.
+
+# Appendix: Reproducibility
+
+All results can be reproduced from the project repository:
+
+```r
+source("install_packages.R")
+source("run_all.R")
+```
+
+Analysis scripts are located in the `R/` folder.

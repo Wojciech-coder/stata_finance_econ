@@ -1,0 +1,7 @@
+source("R/00_setup.R")
+source("R/01_data_load.R")
+source("R/02_eda.R")
+source("R/03_simple_regression.R")
+source("R/04_multiple_regression.R")
+source("R/05_model_selection.R")
+source("R/06_diagnostics.R")
